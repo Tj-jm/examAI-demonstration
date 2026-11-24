@@ -1,0 +1,61 @@
+{
+  "_help": "Sales notes for the student app. Each page is keyed by its path (\":id\" matches any one part). note: what the rep says or shows (blank lines start a new paragraph). tier: the plan the page belongs to, one of the names in tiers (empty: no badge). features: a tier per feature on that page, for later. Add tier names to tiers when the plans are decided.",
+  "tiers": [],
+  "pages": {
+    "/": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/batches/:id": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/batches/:id/lectures": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/batches/:id/lectures/:id": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/batches/:id/practice": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/batches/:id/exams": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/batches/:id/archive": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/batches/:id/doubts": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/leaderboard": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/purchases": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    },
+    "/account": {
+      "tier": "",
+      "note": "",
+      "features": {}
+    }
+  }
+}

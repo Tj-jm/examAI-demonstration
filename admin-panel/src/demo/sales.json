@@ -1,0 +1,29 @@
+{
+  "_help": "Sales notes for the admin panel. Each page is keyed by its path (\":id\" matches any one part). note: what the rep says or shows (blank lines start a new paragraph). tier: the plan the page belongs to, one of the names in tiers (empty: no badge). features: a tier per feature on that page, for later. Add tier names to tiers when the plans are decided.",
+  "tiers": [],
+  "pages": {
+    "/": { "tier": "", "note": "", "features": {} },
+    "/batches": { "tier": "", "note": "", "features": {} },
+    "/batches/:id": { "tier": "", "note": "", "features": {} },
+    "/students": { "tier": "", "note": "", "features": {} },
+    "/questions": { "tier": "", "note": "", "features": {} },
+    "/questions/:id": { "tier": "", "note": "", "features": {} },
+    "/archive": { "tier": "", "note": "", "features": {} },
+    "/generate": { "tier": "", "note": "", "features": {} },
+    "/lectures": { "tier": "", "note": "", "features": {} },
+    "/lectures/:id": { "tier": "", "note": "", "features": {} },
+    "/exams": { "tier": "", "note": "", "features": {} },
+    "/exams/:id": { "tier": "", "note": "", "features": {} },
+    "/grading": { "tier": "", "note": "", "features": {} },
+    "/doubts": { "tier": "", "note": "", "features": {} },
+    "/referrals": { "tier": "", "note": "", "features": {} },
+    "/live-classes": { "tier": "", "note": "", "features": {} },
+    "/notices": { "tier": "", "note": "", "features": {} },
+    "/coupons": { "tier": "", "note": "", "features": {} },
+    "/campaigns": { "tier": "", "note": "", "features": {} },
+    "/posters": { "tier": "", "note": "", "features": {} },
+    "/agents": { "tier": "", "note": "", "features": {} },
+    "/performance": { "tier": "", "note": "", "features": {} },
+    "/settings": { "tier": "", "note": "", "features": {} }
+  }
+}

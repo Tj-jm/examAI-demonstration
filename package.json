@@ -1,0 +1,16 @@
+{
+  "name": "examai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Root workspace — runs backend, admin-panel, and student-app together. Each still has its own package.json and its own node_modules; this doesn't merge them, it just launches all three with one command.",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix admin-panel && npm install --prefix student-app",
+    "dev": "node scripts/dev.js",
+    "test": "npm test --prefix backend",
+    "verify": "npm run verify --prefix admin-panel",
+    "build": "npm run build --prefix admin-panel && npm run build --prefix student-app"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

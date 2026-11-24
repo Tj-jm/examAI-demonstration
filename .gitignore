@@ -1,0 +1,33 @@
+node_modules/
+dist/
+uploads/
+hls-work/
+
+# Downloaded .gguf weights for the embedded AI provider (ai/embedded.js) —
+# multi-gigabyte model files, never meant to ship in the resold codebase.
+embedded-models/
+# The llama.cpp server binary it downloads and runs, per platform.
+llama-bin/
+
+# Secrets. .env.ready is a template with generated values, safe to share;
+# .env is the live one and must never be committed.
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+*.log
+
+# Test accounts written by npm run seed:people
+backend/seed-accounts.csv
+backend/sim-accounts.csv
+
+# IP-to-location database the Visitors page downloads (utils/geo.js).
+geo-data/
+
+# Local database dumps and upload archives. Never committed: they hold
+# real student data, and uploads.tgz is over GitHub's 100 MB file limit.
+non-git/
+
+# The sales demo's settings (deploy/docker-compose.demo.yml)
+deploy/demo.env
