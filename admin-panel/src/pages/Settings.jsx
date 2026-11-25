@@ -2266,6 +2266,8 @@ function AiSection() {
         <EmbeddedModels
           currentModel={config.model}
           onUse={(id) => update({ model: id })}
+          gpu={config.embeddedGpu || "auto"}
+          onGpu={(v) => update({ embeddedGpu: v })}
         />
       )}
       {sub === "limits" && <GeneralCreditPlans />}

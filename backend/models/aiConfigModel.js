@@ -48,6 +48,9 @@ const aiConfigSchema = new mongoose.Schema(
     // vision-capable model, used for pdf/slide extraction. may differ from
     // the text model, and may be unset when the text model handles both.
     visionModel: String,
+    // The built-in model (provider "embedded"): run on the GPU when there
+    // is one ("auto"), or always on the CPU ("off"). ai/embedded.js.
+    embeddedGpu: { type: String, enum: ["auto", "off"], default: "auto" },
 
     apiKeyEncrypted: {
       type: String,

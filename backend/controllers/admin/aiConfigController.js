@@ -49,6 +49,7 @@ const shapeConfig = (config) => {
     baseUrl: config.baseUrl,
     model: config.model,
     visionModel: config.visionModel,
+    embeddedGpu: config.embeddedGpu || "auto",
     // The key is never returned, only its tail, so a compromised admin
     // session cannot read it back out.
     hasApiKey: Boolean(config.apiKeyLast4),
@@ -109,6 +110,9 @@ const updateConfig = asyncHandler(async (req, res) => {
   const wasEmbedded = config.provider === "embedded";
   const previousModel = config.model;
 
+  const previousGpu = config.embeddedGpu || "auto";
+  const { embeddedGpu } = req.body;
+  if (["auto", "off"].includes(embeddedGpu)) config.embeddedGpu = embeddedGpu;
   const { provider, baseUrl, model, visionModel, apiKey, features, limits, pricing, featureCosts, docChat, agents, handwritingCheck, voice, images, practiceQna, studentVideos, hints, languages, poraDhora, aiTutor, interview } = req.body;
 
   if (provider) config.provider = provider;
@@ -304,6 +308,13 @@ const updateConfig = asyncHandler(async (req, res) => {
   // on, and a failure here does not make the save itself fail.
   if (wasEmbedded && previousModel && (config.provider !== "embedded" || config.model !== previousModel)) {
     require("../../ai/embedded").unload(previousModel).catch(() => {});
+  }
+  // GPU on or off: the running server restarts on the next request, on the
+  // new choice, and a GPU that failed earlier is tried again.
+  if ((config.embeddedGpu || "auto") !== previousGpu) {
+    const embedded = require("../../ai/embedded");
+    embedded.resetGpu();
+    embedded.unload().catch(() => {});
   }
 
   res.status(200).json(shapeConfig(config));

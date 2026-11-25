@@ -15,7 +15,9 @@ ENV NODE_ENV=production SERVE_STATIC=true PORT=5000 STORAGE_LOCAL_PATH=/data/upl
 # ffmpeg: makes the HD lecture export into a course MP4 (videoLessonController toCourseMp4).
 # chromium + fonts: prints slides and records lesson videos (utils/slidePrint.js, lessonRender.js),
 # Noto for Bangla and English.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libgomp1 libcurl4 ffmpeg \
+# libvulkan1: the built-in model's GPU build (Vulkan). Start the container
+# with the GPU passed in (NVIDIA: --gpus all; AMD/Intel: --device /dev/dri).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libgomp1 libcurl4 ffmpeg libvulkan1 \
   chromium fonts-noto-core \
   && rm -rf /var/lib/apt/lists/*
 ENV CHROMIUM_PATH=/usr/bin/chromium
@@ -30,6 +32,8 @@ COPY --from=web /src/student-app/dist /app/student-app/dist
 RUN mkdir -p /data/uploads /data/snapshot /data/embedded-models /data/llama-bin geo-data \
   && chown -R node:node /data geo-data
 ENV EMBEDDED_MODELS_DIR=/data/embedded-models LLAMA_BIN_DIR=/data/llama-bin
+# NVIDIA's container runtime adds its Vulkan driver only when graphics is asked for.
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 # The city lookup's database (backend/utils/geo.js) lives on the data volume.
 ENV GEO_DATA_DIR=/data/geo
 # Uploads, built-in models and the city database. Mount a named volume here

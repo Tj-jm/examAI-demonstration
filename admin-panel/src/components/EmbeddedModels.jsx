@@ -16,7 +16,7 @@ import { Loading, useConfirm } from "./bits";
 // disk and runs inside this same process (ai/embedded.js), so a model is
 // either installed or it isn't — never unreachable, and never something to
 // paste into a terminal.
-export default function EmbeddedModels({ currentModel, onUse }) {
+export default function EmbeddedModels({ currentModel, onUse, gpu = "auto", onGpu }) {
   const { data, isLoading, refetch } = useGetEmbeddedModelsQuery();
   const [pull, { error: pullError }] = usePullEmbeddedModelMutation();
   const [remove, { error: removeError }] = useDeleteEmbeddedModelMutation();
@@ -94,6 +94,32 @@ export default function EmbeddedModels({ currentModel, onUse }) {
           ? "Nothing downloaded yet."
           : `${data.installed.length} model${data.installed.length === 1 ? "" : "s"} downloaded.`}
       </p>
+
+      <div className="card-quiet stack" style={{ gap: 6 }}>
+        <div className="spread" style={{ gap: 8, flexWrap: "wrap" }}>
+          <div className="row-tight" style={{ gap: 6 }}><Cpu size={15} /> <b>GPU</b></div>
+          {onGpu && (
+            <div className="row-tight" style={{ gap: 4 }}>
+              {[["auto", "Use when available"], ["off", "CPU only"]].map(([v, l]) => (
+                <button key={v} type="button" className={`pill pill-btn${gpu === v ? " pill-on" : ""}`} onClick={() => gpu !== v && onGpu(v)}>{l}</button>
+              ))}
+            </div>
+          )}
+        </div>
+        <span className="hint">
+          {gpu === "off"
+            ? "Always runs on the CPU."
+            : data?.gpu?.backends?.length
+              ? `Found: ${data.gpu.note}. The model loads onto it, and falls back to the CPU if that fails.`
+              : `No GPU found (${data?.gpu?.note || "checking"}), so it runs on the CPU.`}
+          {data?.device && ` Running now on the ${data.device.backend === "cpu" ? "CPU" : `GPU (${data.device.backend}${data.device.offload ? `, ${data.device.offload.layers}/${data.device.offload.of} layers` : ""})`}.`}
+        </span>
+        {data?.gpuFailed && gpu !== "off" && (
+          <span className="hint" style={{ color: "var(--warning)" }}>
+            The GPU ({data.gpuFailed.backend}) did not start, so the CPU is used: {data.gpuFailed.reason}
+          </span>
+        )}
+      </div>
 
       {pullError && (
         <div className="banner banner-bad row-tight">

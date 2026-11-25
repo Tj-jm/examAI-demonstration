@@ -3,7 +3,7 @@ const EmbeddedModel = require("../models/embeddedModelModel");
 const { CATALOGUE } = require("./embeddedCatalogue");
 const fs = require("fs");
 const path = require("path");
-const { resolveBinary, BIN_ROOT } = require("./llamaServerBinary");
+const { resolveBinary, detectGpu, BIN_ROOT } = require("./llamaServerBinary");
 const { spawn } = require("child_process");
 
 // The embedded provider runs a real llama.cpp server (llama-server) as a
@@ -141,6 +141,84 @@ const resolveRecord = async (catalogueId) => {
   return record;
 };
 
+// Where the model runs: the GPU when there is one (Settings → AI →
+// Built-in: GPU "auto", the default) and the CPU otherwise or with "off".
+// A GPU build that fails to start (no driver, too little GPU memory, a
+// download that failed) is noted and the CPU build started instead; that
+// GPU is not tried again until the setting changes or the backend
+// restarts, so each start doesn't pay for a failed attempt.
+let device = null; // { backend, offload, note } for the running server
+let gpuFailed = null; // { backend, reason, at }
+const resetGpu = () => { gpuFailed = null; };
+
+const gpuSetting = async () => {
+  try {
+    const AiConfig = require("../models/aiConfigModel");
+    const config = await AiConfig.get();
+    return config?.embeddedGpu === "off" ? "off" : "auto";
+  } catch {
+    return "auto";
+  }
+};
+
+// Starts llama-server on one backend; resolves once it answers /health.
+const launch = async (record, backend) => {
+  const { binaryPath, libDirs } = await resolveBinary(backend);
+  const port = await findFreePort();
+  const gpu = backend !== "cpu";
+
+  const args = [
+    "-m", record.filePath,
+    "--port", String(port),
+    "--host", "127.0.0.1",
+    "-c", String(CONTEXT),
+    // One request at a time (see enqueue), so one slot gets the whole
+    // context; llama-server otherwise splits it across parallel slots.
+    "-np", "1",
+    // Every layer on the GPU when there is one (llama.cpp keeps what does
+    // not fit on the CPU); none otherwise.
+    "-ngl", gpu ? "999" : "0",
+    "--no-webui",
+  ];
+  if (record.mmprojPath) args.push("--mmproj", record.mmprojPath);
+
+  const sep = path.delimiter;
+  const env = { ...process.env, LD_LIBRARY_PATH: [...libDirs, process.env.LD_LIBRARY_PATH].filter(Boolean).join(sep) };
+  if (process.platform === "win32") env.PATH = [...libDirs, process.env.PATH].filter(Boolean).join(sep);
+  const proc = spawn(binaryPath, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  hookExit();
+  writePid(proc.pid);
+  starting = proc;
+
+  let startupLog = "";
+  const capture = (buf) => {
+    startupLog = (startupLog + buf.toString()).slice(-16000);
+  };
+  proc.stdout.on("data", capture);
+  proc.stderr.on("data", capture);
+
+  const exited = new Promise((resolve) => proc.once("exit", (code) => resolve(code)));
+
+  try {
+    await Promise.race([
+      waitForHealth(port),
+      exited.then((code) => {
+        throw new Error(`The built-in model server (${backend}) exited before starting (code ${code}).\n${startupLog.slice(-800)}`);
+      }),
+    ]);
+  } catch (error) {
+    try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+    clearPid();
+    throw error;
+  } finally {
+    if (starting === proc) starting = null;
+  }
+
+  // "offloaded 29/29 layers to GPU": how much of the model is on the GPU.
+  const offload = (startupLog.match(/offloaded (\d+)\/(\d+) layers to GPU/) || []).slice(1).map(Number);
+  return { proc, port, offload: offload.length ? { layers: offload[0], of: offload[1] } : null };
+};
+
 const ensureRunning = async (catalogueId) => {
   if (current?.catalogueId === catalogueId) return current;
   if (switching?.catalogueId === catalogueId) return switching.promise;
@@ -149,58 +227,37 @@ const ensureRunning = async (catalogueId) => {
     const record = await resolveRecord(catalogueId);
     await stopCurrent();
 
-    const { binaryPath, libDir } = await resolveBinary();
-    const port = await findFreePort();
+    const setting = await gpuSetting();
+    const detected = setting === "off" ? { backends: [], note: "GPU turned off in settings" } : await detectGpu();
+    const tries = [...detected.backends.filter((b) => !gpuFailed || gpuFailed.backend !== b), "cpu"];
 
-    const args = [
-      "-m", record.filePath,
-      "--port", String(port),
-      "--host", "127.0.0.1",
-      "-c", String(CONTEXT),
-      // One request at a time (see enqueue), so one slot gets the whole
-      // context; llama-server otherwise splits it across parallel slots.
-      "-np", "1",
-      "-ngl", "0",
-      "--no-webui",
-    ];
-    if (record.mmprojPath) args.push("--mmproj", record.mmprojPath);
-
-    const proc = spawn(binaryPath, args, {
-      env: { ...process.env, LD_LIBRARY_PATH: libDir },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    hookExit();
-    writePid(proc.pid);
-    starting = proc;
-
-    let startupLog = "";
-    const capture = (buf) => {
-      startupLog = (startupLog + buf.toString()).slice(-4000);
-    };
-    proc.stdout.on("data", capture);
-    proc.stderr.on("data", capture);
-
-    const exited = new Promise((resolve) => proc.once("exit", (code) => resolve(code)));
-
-    try {
-      await Promise.race([
-        waitForHealth(port),
-        exited.then((code) => {
-          throw new Error(`The built-in model server exited before starting (code ${code}).\n${startupLog.slice(-800)}`);
-        }),
-      ]);
-    } catch (error) {
-      try { proc.kill("SIGKILL"); } catch { /* already gone */ }
-      clearPid();
-      throw error;
-    } finally {
-      if (starting === proc) starting = null;
+    let started = null;
+    let lastError = null;
+    for (const backend of tries) {
+      try {
+        started = { backend, ...(await launch(record, backend)) };
+        break;
+      } catch (error) {
+        lastError = error;
+        if (backend !== "cpu") {
+          gpuFailed = { backend, reason: String(error.message || error).split("\n").slice(0, 3).join(" ").slice(0, 400), at: Date.now() };
+          console.error(`Built-in model: the ${backend} GPU build did not start, using the CPU. ${gpuFailed.reason}`);
+        }
+      }
     }
+    if (!started) throw lastError;
 
+    const gpuNote = started.backend === "cpu"
+      ? (gpuFailed ? `GPU (${gpuFailed.backend}) failed: ${gpuFailed.reason}` : detected.note)
+      : detected.note;
+    device = { backend: started.backend, offload: started.offload, note: gpuNote };
+    if (started.backend !== "cpu") console.log(`Built-in model: running on the GPU (${started.backend}${started.offload ? `, ${started.offload.layers}/${started.offload.of} layers` : ""}).`);
+
+    const { proc, port } = started;
     const loaded = { catalogueId, port, proc };
     current = loaded;
     proc.once("exit", () => {
-      if (current?.proc === proc) { current = null; clearPid(); }
+      if (current?.proc === proc) { current = null; device = null; clearPid(); }
     });
 
     return loaded;
@@ -355,7 +412,8 @@ const activity = async () => {
   const avg = recent.length ? Number((recent.reduce((t, l) => t + l.tokensPerSecond, 0) / recent.length).toFixed(1)) : null;
   return {
     now,
-    server: current ? { model: current.catalogueId, port: current.port, pid: current.proc?.pid || null, loadedAt } : null,
+    server: current ? { model: current.catalogueId, port: current.port, pid: current.proc?.pid || null, loadedAt, device } : null,
+    gpuFailed,
     starting: Boolean(starting),
     context: CONTEXT,
     machine: { cpus: os.cpus().length, freeMemGb: Number((os.freemem() / 1e9).toFixed(1)), totalMemGb: Number((os.totalmem() / 1e9).toFixed(1)) },
@@ -379,4 +437,4 @@ const unload = async (catalogueId) => {
 // what's selected (it respawns on the next call that needs it).
 const getStatus = () => (current ? { catalogueId: current.catalogueId, port: current.port } : null);
 
-module.exports = { complete, unload, getStatus, activity };
+module.exports = { complete, unload, getStatus, activity, resetGpu };

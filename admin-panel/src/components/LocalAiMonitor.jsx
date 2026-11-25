@@ -71,11 +71,15 @@ export default function LocalAiMonitor() {
       </div>
 
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <Stat Icon={Cpu} name="Model" value={server ? server.model : "Not loaded"} sub={server ? `Loaded ${clock(server.loadedAt)} · ${context.toLocaleString()} token context` : "Loads on the next request"} />
+        <Stat Icon={Cpu} name="Model" value={server ? server.model : "Not loaded"} sub={server ? `${server.device?.backend && server.device.backend !== "cpu" ? `GPU (${server.device.backend}${server.device.offload ? `, ${server.device.offload.layers}/${server.device.offload.of} layers` : ""})` : "CPU"} · loaded ${clock(server.loadedAt)} · ${context.toLocaleString()} token context` : "Loads on the next request"} />
         <Stat Icon={Clock} name="Waiting" value={waiting.length} sub={waiting.length ? `Oldest waiting ${secs(now - waiting[0].queuedAt)}` : "No queue"} />
         <Stat Icon={Gauge} name="Speed" value={averageTokensPerSecond ? `${averageTokensPerSecond} tok/s` : "—"} sub="Average of the last 10 answers" />
         <Stat Icon={MemoryStick} name="Server" value={`${machine?.freeMemGb ?? "—"} GB free`} sub={`of ${machine?.totalMemGb ?? "—"} GB · ${machine?.cpus ?? "—"} CPU threads`} />
       </div>
+
+      {data?.gpuFailed && (
+        <div className="banner banner-warn">The GPU ({data.gpuFailed.backend}) did not start, so the model runs on the CPU: {data.gpuFailed.reason}</div>
+      )}
 
       <div className="card stack" style={{ gap: 10 }}>
         <b>Now</b>

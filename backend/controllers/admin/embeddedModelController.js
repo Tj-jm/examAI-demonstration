@@ -49,6 +49,11 @@ const getEmbeddedModels = asyncHandler(async (req, res) => {
     installed: installed.map((r) => ({ id: r.catalogueId, sizeGb: r.sizeBytes ? Number((r.sizeBytes / 1e9).toFixed(1)) : null })),
     pulls: [...pulls.entries()].map(([id, state]) => ({ id, ...state })),
     running: embedded.getStatus()?.catalogueId || null,
+    // Where it runs: the GPU found on this server (if any), and the
+    // running server's backend and layers on the GPU.
+    gpu: await require("../../ai/llamaServerBinary").detectGpu().catch(() => ({ backends: [], note: "could not check" })),
+    device: (await embedded.activity()).server?.device || null,
+    gpuFailed: (await embedded.activity()).gpuFailed || null,
   });
 });
 

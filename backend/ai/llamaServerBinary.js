@@ -25,18 +25,40 @@ const RELEASE_URL = (assetName) =>
 
 // Every one of these filenames was checked to actually exist for this tag
 // (a HEAD request against the real release, not just the naming convention
-// docs) before being hardcoded here. Only linux/x64 has been exercised
+// docs) before being hardcoded here. Only linux/x64 CPU has been exercised
 // beyond that — actually downloaded, extracted, and run. The rest follow
 // llama.cpp's own documented, consistent asset-naming scheme for the same
 // release, but have not been run on this codebase; if one turns out wrong,
-// resolveBinary() fails loudly (a 404 or a missing executable) rather than
-// silently falling back to something else.
-const ASSET_BY_PLATFORM = {
-  "linux-x64": { asset: "llama-{TAG}-bin-ubuntu-x64.tar.gz", archive: "tar.gz", verified: true },
-  "linux-arm64": { asset: "llama-{TAG}-bin-ubuntu-arm64.tar.gz", archive: "tar.gz", verified: false },
-  "darwin-arm64": { asset: "llama-{TAG}-bin-macos-arm64.tar.gz", archive: "tar.gz", verified: false },
-  "darwin-x64": { asset: "llama-{TAG}-bin-macos-x64.tar.gz", archive: "tar.gz", verified: false },
-  "win32-x64": { asset: "llama-{TAG}-bin-win-cpu-x64.zip", archive: "zip", verified: false },
+// resolveBinary() fails loudly (a 404 or a missing executable) and the
+// caller falls back to the CPU build.
+//
+// One build per backend: "cpu" everywhere; "vulkan" (any GPU with a Vulkan
+// driver: NVIDIA, AMD, Intel) on Linux and Windows; "cuda" (NVIDIA, with
+// its runtime in a second archive) on Windows — llama.cpp ships no Linux
+// CUDA build, so NVIDIA on Linux runs through Vulkan. Apple Silicon's
+// build already has Metal, so "metal" is the CPU archive run with layers
+// on the GPU.
+const BUILDS = {
+  "linux-x64": {
+    cpu: ["llama-{TAG}-bin-ubuntu-x64.tar.gz"],
+    vulkan: ["llama-{TAG}-bin-ubuntu-vulkan-x64.tar.gz"],
+  },
+  "linux-arm64": {
+    cpu: ["llama-{TAG}-bin-ubuntu-arm64.tar.gz"],
+    vulkan: ["llama-{TAG}-bin-ubuntu-vulkan-arm64.tar.gz"],
+  },
+  "darwin-arm64": {
+    cpu: ["llama-{TAG}-bin-macos-arm64.tar.gz"],
+    metal: ["llama-{TAG}-bin-macos-arm64.tar.gz"],
+  },
+  "darwin-x64": {
+    cpu: ["llama-{TAG}-bin-macos-x64.tar.gz"],
+  },
+  "win32-x64": {
+    cpu: ["llama-{TAG}-bin-win-cpu-x64.zip"],
+    cuda: ["llama-{TAG}-bin-win-cuda-12.4-x64.zip", "cudart-llama-bin-win-cuda-12.4-x64.zip"],
+    vulkan: ["llama-{TAG}-bin-win-vulkan-x64.zip"],
+  },
 };
 
 const platformKey = () => `${process.platform}-${process.arch}`;
@@ -74,53 +96,92 @@ const findExecutable = (dir, name) => {
   return null;
 };
 
-// Resolves (downloading and extracting on first use) the llama-server
-// binary for this host, returning its path and the directory holding its
-// shared libraries (they sit next to the binary in every one of these
-// release archives, confirmed for linux/x64 by actually running it with
-// that directory as LD_LIBRARY_PATH).
-const resolveBinary = async () => {
+// The GPU backends worth trying on this machine, best first, and why. Only
+// cheap checks (a driver tool, a library file, a device node): whether the
+// GPU really works is found out by starting the server on it (ai/embedded.js
+// falls back to the CPU when it doesn't).
+const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
+const detectGpu = async () => {
   const key = platformKey();
-  const entry = ASSET_BY_PLATFORM[key];
-  if (!entry) {
-    const supported = Object.keys(ASSET_BY_PLATFORM).join(", ");
+  const builds = BUILDS[key] || {};
+  const found = [];
+  const notes = [];
+  if (builds.metal) {
+    found.push("metal");
+    notes.push("Apple Silicon (Metal)");
+  }
+  if (builds.cuda) {
+    try {
+      const { stdout } = await execFileAsync("nvidia-smi", ["-L"], { timeout: 5000, windowsHide: true });
+      const gpu = stdout.split("\n").find((l) => /^GPU \d/.test(l));
+      if (gpu) { found.push("cuda"); notes.push(gpu.replace(/\s*\(UUID.*$/, "").trim()); }
+    } catch { /* no NVIDIA driver */ }
+  }
+  if (builds.vulkan) {
+    let loader = false;
+    let device = false;
+    if (process.platform === "win32") {
+      loader = exists(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "vulkan-1.dll"));
+      device = loader;
+    } else {
+      loader = ["/usr/lib/x86_64-linux-gnu/libvulkan.so.1", "/usr/lib/aarch64-linux-gnu/libvulkan.so.1", "/usr/lib64/libvulkan.so.1", "/usr/lib/libvulkan.so.1"].some(exists);
+      let dri = [];
+      try { dri = fs.readdirSync("/dev/dri").filter((n) => n.startsWith("renderD")); } catch { /* none */ }
+      device = dri.length > 0 || exists("/dev/nvidia0");
+      if (!loader && device) notes.push("a GPU is present but the Vulkan library (libvulkan1) is not installed");
+    }
+    if (loader && device) { found.push("vulkan"); if (!notes.length) notes.push("Vulkan GPU"); }
+  }
+  return { backends: found, note: notes.join("; ") || "no GPU found" };
+};
+
+const binDir = (key, backend) => path.join(BIN_ROOT, backend === "cpu" || backend === "metal" ? `${LLAMA_CPP_TAG}-${key}` : `${LLAMA_CPP_TAG}-${key}-${backend}`);
+
+// Resolves (downloading and extracting on first use) the llama-server
+// binary for this host and backend ("cpu" unless said otherwise),
+// returning its path and the directories holding its shared libraries
+// (they sit next to the binary in every one of these release archives,
+// confirmed for linux/x64 by actually running it with that directory as
+// LD_LIBRARY_PATH; the CUDA runtime archive extracts beside it).
+const resolveBinary = async (backend = "cpu") => {
+  const key = platformKey();
+  const builds = BUILDS[key];
+  if (!builds) {
+    const supported = Object.keys(BUILDS).join(", ");
     throw new Error(
       `The built-in model feature has no llama.cpp build for this server (${key}). Supported: ${supported}.`
     );
   }
+  const assets = builds[backend];
+  if (!assets) throw new Error(`No ${backend} build of the built-in model server for ${key}.`);
 
   const exeName = process.platform === "win32" ? "llama-server.exe" : "llama-server";
-  const destDir = path.join(BIN_ROOT, `${LLAMA_CPP_TAG}-${key}`);
+  const destDir = binDir(key, backend);
+  const done = (binaryPath) => ({ binaryPath, libDirs: [...new Set([path.dirname(binaryPath), destDir])] });
   const existing = fs.existsSync(destDir) ? findExecutable(destDir, exeName) : null;
-  if (existing) {
-    return { binaryPath: existing, libDir: path.dirname(existing) };
-  }
-
-  fs.mkdirSync(BIN_ROOT, { recursive: true });
-  const assetName = entry.asset.replace("{TAG}", LLAMA_CPP_TAG);
-  const archivePath = path.join(BIN_ROOT, assetName);
-
-  if (!fs.existsSync(archivePath)) {
-    await downloadFile(RELEASE_URL(assetName), archivePath);
-  }
+  if (existing) return done(existing);
 
   fs.mkdirSync(destDir, { recursive: true });
-  if (entry.archive === "tar.gz") {
-    await extractTarGz(archivePath, destDir);
-  } else {
-    await extractZip(archivePath, destDir);
+  for (const asset of assets) {
+    const assetName = asset.replace("{TAG}", LLAMA_CPP_TAG);
+    const archivePath = path.join(BIN_ROOT, assetName);
+    if (!fs.existsSync(archivePath)) {
+      await downloadFile(RELEASE_URL(assetName), archivePath);
+    }
+    if (assetName.endsWith(".tar.gz")) await extractTarGz(archivePath, destDir);
+    else await extractZip(archivePath, destDir);
+    try { fs.unlinkSync(archivePath); } catch { /* best effort cleanup */ }
   }
-  try { fs.unlinkSync(archivePath); } catch { /* best effort cleanup */ }
 
   const binaryPath = findExecutable(destDir, exeName);
   if (!binaryPath) {
-    throw new Error(`Downloaded the built-in model server for ${key} but could not find ${exeName} inside it.`);
+    throw new Error(`Downloaded the built-in model server for ${key} (${backend}) but could not find ${exeName} inside it.`);
   }
   if (process.platform !== "win32") {
     try { fs.chmodSync(binaryPath, 0o755); } catch { /* archive usually already sets this */ }
   }
 
-  return { binaryPath, libDir: path.dirname(binaryPath) };
+  return done(binaryPath);
 };
 
-module.exports = { resolveBinary, LLAMA_CPP_TAG, BIN_ROOT };
+module.exports = { resolveBinary, detectGpu, LLAMA_CPP_TAG, BIN_ROOT };
