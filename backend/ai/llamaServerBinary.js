@@ -73,14 +73,23 @@ const BIN_ROOT = path.resolve(process.env.LLAMA_BIN_DIR || path.join(__dirname, 
 const extractTarGz = (archivePath, destDir) =>
   execFileAsync("tar", ["-xzf", archivePath, "-C", destDir]);
 
+// Windows 10 1803+ ships bsdtar as System32\tar.exe, which reads zip and
+// reports errors as a failed exit. PowerShell's Expand-Archive is the
+// fallback; its errors are non-terminating by default (exit 0 with files
+// missing), so ErrorActionPreference makes them fail the call.
 const extractZip = async (archivePath, destDir) => {
-  // No pure-JS unzip dependency added for the one platform (Windows) this
-  // could not be live-tested on — PowerShell's Expand-Archive ships with
-  // every Windows version new enough to run this Node backend at all.
+  const tarExe = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+  if (fs.existsSync(tarExe)) {
+    try {
+      await execFileAsync(tarExe, ["-xf", archivePath, "-C", destDir], { windowsHide: true });
+      return;
+    } catch { /* fall back to PowerShell */ }
+  }
+  const q = (s) => s.replace(/'/g, "''");
   await execFileAsync("powershell.exe", [
     "-NoProfile", "-NonInteractive", "-Command",
-    `Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${destDir}' -Force`,
-  ]);
+    `$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '${q(archivePath)}' -DestinationPath '${q(destDir)}' -Force`,
+  ], { windowsHide: true });
 };
 
 const findExecutable = (dir, name) => {
@@ -162,6 +171,8 @@ const resolveBinary = async (backend = "cpu") => {
   const existing = fs.existsSync(destDir) ? findExecutable(destDir, exeName) : null;
   if (existing) return done(existing);
 
+  // A folder without the executable is a cut-off earlier attempt: start clean.
+  fs.rmSync(destDir, { recursive: true, force: true });
   fs.mkdirSync(destDir, { recursive: true });
   for (const asset of assets) {
     const assetName = asset.replace("{TAG}", LLAMA_CPP_TAG);
@@ -176,7 +187,15 @@ const resolveBinary = async (backend = "cpu") => {
 
   const binaryPath = findExecutable(destDir, exeName);
   if (!binaryPath) {
-    throw new Error(`Downloaded the built-in model server for ${key} (${backend}) but could not find ${exeName} inside it.`);
+    let listed = [];
+    try { listed = fs.readdirSync(destDir); } catch { /* none */ }
+    const blocked = process.platform === "win32" && listed.some((n) => /^llama-server-impl\.dll$/i.test(n));
+    fs.rmSync(destDir, { recursive: true, force: true });
+    throw new Error(
+      `Downloaded the built-in model server for ${key} (${backend}) but could not find ${exeName} inside it` +
+      (blocked ? ": the rest of the archive is there, so antivirus most likely removed it. Allow it in Windows Security (Protection history) and try again."
+        : `. Extracted: ${listed.length ? listed.slice(0, 8).join(", ") : "nothing"}.`)
+    );
   }
   if (process.platform !== "win32") {
     try { fs.chmodSync(binaryPath, 0o755); } catch { /* archive usually already sets this */ }
