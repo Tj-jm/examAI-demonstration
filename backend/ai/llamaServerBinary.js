@@ -153,7 +153,9 @@ const binDir = (key, backend) => path.join(BIN_ROOT, backend === "cpu" || backen
 // (they sit next to the binary in every one of these release archives,
 // confirmed for linux/x64 by actually running it with that directory as
 // LD_LIBRARY_PATH; the CUDA runtime archive extracts beside it).
-const resolveBinary = async (backend = "cpu") => {
+// `onStep({ step, downloadedSize, totalSize })`: "download" / "extract", for
+// Performance → Local AI.
+const resolveBinary = async (backend = "cpu", onStep) => {
   const key = platformKey();
   const builds = BUILDS[key];
   if (!builds) {
@@ -178,8 +180,9 @@ const resolveBinary = async (backend = "cpu") => {
     const assetName = asset.replace("{TAG}", LLAMA_CPP_TAG);
     const archivePath = path.join(BIN_ROOT, assetName);
     if (!fs.existsSync(archivePath)) {
-      await downloadFile(RELEASE_URL(assetName), archivePath);
+      await downloadFile(RELEASE_URL(assetName), archivePath, (p) => onStep?.({ step: "download", ...p }));
     }
+    onStep?.({ step: "extract" });
     if (assetName.endsWith(".tar.gz")) await extractTarGz(archivePath, destDir);
     else await extractZip(archivePath, destDir);
     try { fs.unlinkSync(archivePath); } catch { /* best effort cleanup */ }

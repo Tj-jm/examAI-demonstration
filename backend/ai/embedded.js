@@ -107,7 +107,8 @@ const waitForHealth = async (port, timeoutMs = 180000) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      // A per-check limit: one fetch that never answers must not outlast the deadline.
+      const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3000) });
       if (res.ok) return;
     } catch {
       // Not listening yet — keep polling.
@@ -162,8 +163,14 @@ const gpuSetting = async () => {
 };
 
 // Starts llama-server on one backend; resolves once it answers /health.
+// What a start is doing now, for Performance → Local AI: { backend, step:
+// "download" | "extract" | "start", downloadedSize, totalSize, at }.
+let stage = null;
+
 const launch = async (record, backend) => {
-  const { binaryPath, libDirs } = await resolveBinary(backend);
+  stage = { backend, step: "prepare", at: Date.now() };
+  const { binaryPath, libDirs } = await resolveBinary(backend, (p) => { stage = { backend, ...p, at: stage?.at || Date.now() }; });
+  stage = { backend, step: "start", at: Date.now() };
   const port = await findFreePort();
   const gpu = backend !== "cpu";
 
@@ -267,7 +274,7 @@ const ensureRunning = async (catalogueId) => {
   try {
     return await promise;
   } finally {
-    if (switching?.promise === promise) switching = null;
+    if (switching?.promise === promise) { switching = null; stage = null; }
   }
 };
 
@@ -415,6 +422,7 @@ const activity = async () => {
     server: current ? { model: current.catalogueId, port: current.port, pid: current.proc?.pid || null, loadedAt, device } : null,
     gpuFailed,
     starting: Boolean(starting),
+    stage,
     context: CONTEXT,
     machine: { cpus: os.cpus().length, freeMemGb: Number((os.freemem() / 1e9).toFixed(1)), totalMemGb: Number((os.totalmem() / 1e9).toFixed(1)) },
     running: running ? { ...running, progress } : null,

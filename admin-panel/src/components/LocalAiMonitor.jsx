@@ -57,7 +57,15 @@ export default function LocalAiMonitor() {
   const { server, running, waiting = [], log = [], machine, context, averageTokensPerSecond, now } = data || {};
   const p = running?.progress;
   const elapsed = running?.startedAt ? now - running.startedAt : null;
-  const phase = running?.state === "loading" ? "Loading the model into memory" : p?.phase === "writing" ? "Writing the answer" : running ? "Reading the prompt" : null;
+  const st = data?.stage;
+  const mb = (b) => Math.round((b || 0) / 1e6);
+  const where = st && (st.backend === "cpu" ? "CPU" : `GPU (${st.backend})`);
+  const loadingText = !st ? "Loading the model into memory"
+    : st.step === "download" ? `Downloading the ${where} server: ${mb(st.downloadedSize)}${st.totalSize ? ` of ${mb(st.totalSize)}` : ""} MB`
+    : st.step === "extract" ? `Unpacking the ${where} server`
+    : st.step === "start" ? `Starting on the ${where}, loading the model into memory · ${secs(now - st.at)}`
+    : `Preparing the ${where} server`;
+  const phase = running?.state === "loading" ? loadingText : p?.phase === "writing" ? "Writing the answer" : running ? "Reading the prompt" : null;
 
   return (
     <div className="stack" style={{ gap: 16 }}>
