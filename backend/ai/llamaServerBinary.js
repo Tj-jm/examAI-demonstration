@@ -170,7 +170,11 @@ const resolveBinary = async (backend = "cpu", onStep) => {
   const exeName = process.platform === "win32" ? "llama-server.exe" : "llama-server";
   const destDir = binDir(key, backend);
   const done = (binaryPath) => ({ binaryPath, libDirs: [...new Set([path.dirname(binaryPath), destDir])] });
-  const existing = fs.existsSync(destDir) ? findExecutable(destDir, exeName) : null;
+  // Written once every archive of the build is unpacked. A folder without
+  // it is incomplete (e.g. the CUDA build without its runtime archive, which
+  // still starts, silently on the CPU), so it is fetched again.
+  const marker = path.join(destDir, ".complete");
+  const existing = fs.existsSync(marker) ? findExecutable(destDir, exeName) : null;
   if (existing) return done(existing);
 
   // A folder without the executable is a cut-off earlier attempt: start clean.
@@ -203,6 +207,7 @@ const resolveBinary = async (backend = "cpu", onStep) => {
   if (process.platform !== "win32") {
     try { fs.chmodSync(binaryPath, 0o755); } catch { /* archive usually already sets this */ }
   }
+  fs.writeFileSync(marker, `${LLAMA_CPP_TAG} ${assets.join(" ")}\n`);
 
   return done(binaryPath);
 };
