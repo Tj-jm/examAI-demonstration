@@ -162,6 +162,18 @@ const gpuSetting = async () => {
   }
 };
 
+// NVIDIA GPU memory in MB ({ used, total }), from nvidia-smi; null without it.
+const nvidiaMemory = async () => {
+  try {
+    const { execFile } = require("child_process");
+    const out = await new Promise((resolve, reject) => execFile("nvidia-smi", ["--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"], { timeout: 5000, windowsHide: true }, (e, so) => (e ? reject(e) : resolve(so))));
+    const [used, total] = out.split(/\r?\n/)[0].split(",").map((v) => Number(v.trim()));
+    return Number.isFinite(total) && total > 0 ? { used, total } : null;
+  } catch {
+    return null;
+  }
+};
+
 // Starts llama-server on one backend; resolves once it answers /health.
 // What a start is doing now, for Performance → Local AI: { backend, step:
 // "download" | "extract" | "start", downloadedSize, totalSize, at }.
@@ -188,6 +200,17 @@ const launch = async (record, backend) => {
     "--no-webui",
   ];
   if (record.mmprojPath) args.push("--mmproj", record.mmprojPath);
+  // GPU memory is the limit: what does not fit runs on the CPU, many times
+  // slower. On CUDA and Metal, flash attention with an 8-bit KV cache halves
+  // the context's memory (16K on a 3B model: ~1.7 GB to ~0.9 GB). On a
+  // small NVIDIA GPU (6 GB or less) the image reader also stays on the CPU,
+  // as it is only used for requests with an image.
+  let vram = null;
+  if (backend === "cuda" || backend === "metal") args.push("-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0");
+  if (backend === "cuda") {
+    vram = await nvidiaMemory();
+    if (record.mmprojPath && vram && vram.total <= 6144) args.push("--no-mmproj-offload");
+  }
 
   const sep = path.delimiter;
   const env = { ...process.env, LD_LIBRARY_PATH: [...libDirs, process.env.LD_LIBRARY_PATH].filter(Boolean).join(sep) };
@@ -232,6 +255,11 @@ const launch = async (record, backend) => {
     if (starting === proc) starting = null;
   }
 
+  if (backend === "cuda") {
+    const after = await nvidiaMemory();
+    if (after) details.unshift(`GPU memory: ${after.used} of ${after.total} MB in use after loading (${vram ? `${vram.used} MB before` : "before unknown"}).`);
+  }
+  if (gpu) details.unshift(`Started with: ${args.filter((a, i) => !["-m", "--mmproj"].includes(args[i - 1])).join(" ")}`);
   return { proc, port, offload, details };
 };
 
