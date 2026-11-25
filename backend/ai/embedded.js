@@ -224,9 +224,29 @@ const enqueue = (fn) => {
   return run;
 };
 
+// What the built-in model is doing, for Performance → Local AI: the
+// requests waiting their turn or running now, and the last LOG_SIZE that
+// finished (how long they waited, how long they took, tokens a second).
+const LOG_SIZE = 50;
+const jobs = new Map(); // id -> { id, feature, model, state, queuedAt, startedAt, promptTokens, maxTokens, image }
+const log = [];
+let nextId = 1;
+let loadedAt = null;
+
+const finish = (job, state, extra = {}) => {
+  if (!jobs.has(job.id)) return;
+  jobs.delete(job.id);
+  const endedAt = Date.now();
+  const ms = job.startedAt ? endedAt - job.startedAt : 0;
+  const done = { ...job, state, endedAt, waitMs: (job.startedAt || endedAt) - job.queuedAt, ms, ...extra };
+  if (done.completionTokens && ms) done.tokensPerSecond = Number((done.completionTokens / (ms / 1000)).toFixed(1));
+  log.unshift(done);
+  log.length = Math.min(log.length, LOG_SIZE);
+};
+
 // `signal`: the caller's stop. A stopped request leaves the queue at once,
 // whether it is waiting its turn or already generating.
-const complete = async ({ model: catalogueId, system, prompt, maxTokens, json, schema, schemaName, imageBase64, imageMimeType, signal }) => {
+const complete = async ({ model: catalogueId, system, prompt, maxTokens, json, schema, schemaName, imageBase64, imageMimeType, signal, feature }) => {
   if (!catalogueId) {
     throw new Error("No built-in model is selected. Download and pick one in AI settings.");
   }
@@ -239,42 +259,111 @@ const complete = async ({ model: catalogueId, system, prompt, maxTokens, json, s
   }
 
   const answerTokens = budget({ system, prompt, imageBase64, maxTokens });
+  const job = {
+    id: nextId++, feature: feature || null, model: catalogueId, state: "waiting", queuedAt: Date.now(), startedAt: null,
+    promptTokens: estimate(system) + estimate(prompt), maxTokens: answerTokens, image: Boolean(imageBase64),
+  };
+  jobs.set(job.id, job);
+  const onStop = () => { if (job.state === "waiting") finish(job, "stopped"); };
+  signal?.addEventListener("abort", onStop, { once: true });
 
-  return enqueue(async () => {
-    const { StoppedError } = require("./providers");
-    if (signal?.aborted) throw new StoppedError();
-    const { port } = await ensureRunning(catalogueId);
+  try {
+    return await enqueue(async () => {
+      const { StoppedError } = require("./providers");
+      if (signal?.aborted) throw new StoppedError();
+      job.startedAt = Date.now();
+      if (current?.catalogueId !== catalogueId) job.state = "loading";
+      const { port } = await ensureRunning(catalogueId);
+      if (job.state === "loading") loadedAt = Date.now();
+      job.state = "generating";
 
-    // Deferred, not a top-level require: providers/index.js requires this
-    // file to register the "embedded" adapter, so a top-level require of
-    // providers/index.js here would be a circular import resolved to an
-    // incomplete module. By the time complete() actually runs, that module
-    // has long finished loading, so this plain require just hits Node's
-    // module cache.
-    const { ADAPTERS } = require("./providers");
-    const openAiCompatible = ADAPTERS.custom;
+      // Deferred, not a top-level require: providers/index.js requires this
+      // file to register the "embedded" adapter, so a top-level require of
+      // providers/index.js here would be a circular import resolved to an
+      // incomplete module. By the time complete() actually runs, that module
+      // has long finished loading, so this plain require just hits Node's
+      // module cache.
+      const { ADAPTERS } = require("./providers");
+      const openAiCompatible = ADAPTERS.custom;
 
-    const result = await openAiCompatible.complete({
-      baseUrl: `http://127.0.0.1:${port}/v1`,
-      apiKey: null,
-      model: catalogueId,
-      system,
-      prompt,
-      maxTokens: answerTokens,
-      json,
-      schema,
-      schemaName,
-      imageBase64,
-      imageMimeType,
-      signal,
+      const result = await openAiCompatible.complete({
+        baseUrl: `http://127.0.0.1:${port}/v1`,
+        apiKey: null,
+        model: catalogueId,
+        system,
+        prompt,
+        maxTokens: answerTokens,
+        json,
+        schema,
+        schemaName,
+        imageBase64,
+        imageMimeType,
+        signal,
+      });
+
+      finish(job, "done", {
+        promptTokens: result.promptTokens || job.promptTokens,
+        completionTokens: result.completionTokens || 0,
+        finishReason: result.finishReason || null,
+      });
+      // openAiCompatible reports llama-server's own `model` field, which is
+      // the on-disk file path — replaced with the stable catalogue id, same
+      // as every other field of `result` (text/promptTokens/completionTokens/
+      // finishReason), which pass through unchanged.
+      return { ...result, model: catalogueId };
     });
+  } catch (error) {
+    finish(job, error?.stopped || signal?.aborted ? "stopped" : "failed", { error: String(error?.message || error).slice(0, 300) });
+    throw error;
+  } finally {
+    signal?.removeEventListener("abort", onStop);
+  }
+};
 
-    // openAiCompatible reports llama-server's own `model` field, which is
-    // the on-disk file path — replaced with the stable catalogue id, same
-    // as every other field of `result` (text/promptTokens/completionTokens/
-    // finishReason), which pass through unchanged.
-    return { ...result, model: catalogueId };
-  });
+// llama-server's own view of the running request: tokens written so far.
+// Field names moved between llama.cpp versions, so both are read.
+const slotProgress = async (port) => {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/slots`, { signal: AbortSignal.timeout(1000) });
+    if (!res.ok) return null;
+    const slots = await res.json();
+    const busy = (Array.isArray(slots) ? slots : []).find((sl) => sl.is_processing || sl.state === 1);
+    if (!busy) return null;
+    const next = Array.isArray(busy.next_token) ? busy.next_token[0] : busy.next_token;
+    const written = Number(next?.n_decoded ?? busy.n_decoded ?? 0);
+    return { written, promptTokens: Number(busy.n_prompt_tokens ?? busy.n_prompt_tokens_processed ?? 0) || null };
+  } catch {
+    return null;
+  }
+};
+
+const activity = async () => {
+  const os = require("os");
+  const now = Date.now();
+  const list = [...jobs.values()].sort((a, b) => a.queuedAt - b.queuedAt);
+  const running = list.find((j) => j.state !== "waiting") || null;
+  let progress = null;
+  if (running?.state === "generating" && current?.port) {
+    progress = await slotProgress(current.port);
+    if (progress && running.startedAt) {
+      const secs = (now - running.startedAt) / 1000;
+      progress.tokensPerSecond = progress.written && secs ? Number((progress.written / secs).toFixed(1)) : null;
+      progress.phase = progress.written ? "writing" : "reading the prompt";
+    }
+  }
+  const recent = log.filter((l) => l.state === "done" && l.tokensPerSecond).slice(0, 10);
+  const avg = recent.length ? Number((recent.reduce((t, l) => t + l.tokensPerSecond, 0) / recent.length).toFixed(1)) : null;
+  return {
+    now,
+    server: current ? { model: current.catalogueId, port: current.port, pid: current.proc?.pid || null, loadedAt } : null,
+    starting: Boolean(starting),
+    context: CONTEXT,
+    machine: { cpus: os.cpus().length, freeMemGb: Number((os.freemem() / 1e9).toFixed(1)), totalMemGb: Number((os.totalmem() / 1e9).toFixed(1)) },
+    running: running ? { ...running, progress } : null,
+    waiting: list.filter((j) => j.state === "waiting"),
+    log,
+    averageTokensPerSecond: avg,
+  };
 };
 
 const unload = async (catalogueId) => {
@@ -290,4 +379,4 @@ const unload = async (catalogueId) => {
 // what's selected (it respawns on the next call that needs it).
 const getStatus = () => (current ? { catalogueId: current.catalogueId, port: current.port } : null);
 
-module.exports = { complete, unload, getStatus };
+module.exports = { complete, unload, getStatus, activity };

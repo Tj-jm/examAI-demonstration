@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, X, Library, Trash2, RotateCw, Database, Sparkles, Play, Pause, Zap, MemoryStick, KeyRound, Server, Activity, SlidersHorizontal, Radio } from "lucide-react";
+import { Check, X, Library, Trash2, RotateCw, Database, Sparkles, Play, Pause, Zap, MemoryStick, KeyRound, Server, Activity, SlidersHorizontal, Radio, Cpu } from "lucide-react";
 import CountUp from "../components/CountUp";
 import Latex from "../components/Latex";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../api/performanceApi";
 import { Loading, ErrorNote, Empty, Field, Pager, useConfirm } from "../components/bits";
 import LiveClassMonitor from "../components/LiveClassMonitor";
+import LocalAiMonitor from "../components/LocalAiMonitor";
 
 // Performance (its own page, /performance): what Redis, the cache, the
 // queue and autosave are doing right now, and the settings that trade
@@ -586,6 +587,7 @@ export default function Performance() {
   const TABS = [
     ["live", "Live", Activity],
     ["classes", "Live classes", Radio],
+    ...(data?.ai ? [["local-ai", "Local AI", Cpu]] : []),
     ["settings", "Settings", SlidersHorizontal],
     ...(data?.ai ? [["saved", "Saved AI results", Sparkles]] : []),
   ];
@@ -603,6 +605,7 @@ export default function Performance() {
       </div>
       {tab === "live" && <Live />}
       {tab === "classes" && <LiveClassMonitor />}
+      {tab === "local-ai" && data?.ai && <LocalAiMonitor />}
       {tab === "settings" && <SettingsForm />}
       {tab === "saved" && data?.ai && <SavedResults />}
     </div>

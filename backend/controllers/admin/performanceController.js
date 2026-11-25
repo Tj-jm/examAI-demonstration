@@ -280,4 +280,12 @@ const getLiveHistory = asyncHandler(async (req, res) => {
   res.status(200).json(await require("../../utils/liveMonitor").history(Number(req.query.days) || 7));
 });
 
-module.exports = { getLive, getLiveHistory, getSettings, updateSettings, getStatus, clearCache, listSaved, approveSaved, rejectSaved, addSavedToBank, deleteSaved, SAVED_COST_KEYS };
+//@desc   The built-in AI model: running and waiting requests, and the
+//        last ones that finished (Performance → Local AI)
+//@route  GET /api/performance/local-ai
+//@access Private (owner, admin)
+const getLocalAi = asyncHandler(async (req, res) => {
+  res.status(200).json(await require("../../ai/embedded").activity());
+});
+
+module.exports = { getLocalAi, getLive, getLiveHistory, getSettings, updateSettings, getStatus, clearCache, listSaved, approveSaved, rejectSaved, addSavedToBank, deleteSaved, SAVED_COST_KEYS };

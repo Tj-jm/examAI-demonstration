@@ -20,6 +20,7 @@ export const performanceApi = apiSlice.injectEndpoints({
     }),
     // In-app live classes now, and sampled history (utils/liveMonitor.js).
     getLiveMonitor: builder.query({ query: () => "/performance/live" }),
+    getLocalAi: builder.query({ query: () => "/performance/local-ai" }),
     getLiveHistory: builder.query({ query: (days) => `/performance/live/history?days=${days}` }),
     deleteSavedAiResult: builder.mutation({
       query: (id) => ({ url: `/performance/saved/${id}`, method: "DELETE" }),
@@ -31,5 +32,5 @@ export const performanceApi = apiSlice.injectEndpoints({
 export const {
   useGetPerformanceQuery, useUpdatePerformanceMutation, useGetPerformanceStatusQuery, useClearPerformanceCacheMutation,
   useGetSavedAiResultsQuery, useReviewSavedAiResultMutation, useDeleteSavedAiResultMutation,
-  useGetLiveMonitorQuery, useGetLiveHistoryQuery,
+  useGetLiveMonitorQuery, useGetLiveHistoryQuery, useGetLocalAiQuery,
 } = performanceApi;

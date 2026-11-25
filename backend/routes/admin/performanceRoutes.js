@@ -9,6 +9,7 @@ router.use(protect, allow("owner", "admin"));
 router.route("/").get(c.getSettings).put(c.updateSettings);
 router.get("/status", c.getStatus);
 router.get("/live", c.getLive);
+router.get("/local-ai", c.getLocalAi);
 router.get("/live/history", c.getLiveHistory);
 router.post("/cache/clear", c.clearCache);
 router.get("/saved", c.listSaved);

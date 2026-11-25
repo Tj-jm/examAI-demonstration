@@ -410,6 +410,9 @@ const complete = async ({
     imageMimeType,
     signal,
     reasoningEffort,
+    // For the built-in model's activity log (ai/embedded.js); other
+    // adapters ignore it.
+    feature,
   };
 
   // Each target in turn: a failure (not a stop) moves on to the next.

@@ -35,7 +35,7 @@ const lectureFor = async (studentId, batchId) => {
 // Open now with attempts left (closing soonest first), else the next to open.
 const examFor = async (studentId, batchIds) => {
   const now = Date.now();
-  const exams = await Exam.find({ batches: { $in: batchIds }, isPublished: true, isActive: { $ne: false }, offline: { $ne: true }, $or: [{ closesAt: null }, { closesAt: { $gt: new Date() } }] })
+  const exams = await Exam.find({ batches: { $in: batchIds }, isPublished: true, isActive: { $ne: false }, offline: null, $or: [{ closesAt: null }, { closesAt: { $gt: new Date() } }] })
     .sort({ opensAt: 1 }).limit(60);
   if (!exams.length) return null;
   const used = new Map();
@@ -81,7 +81,7 @@ const forHome = async (studentId, batchIds, { timezone } = {}) => {
     liveFor(batchIds),
     LiveClass.find({ batch: { $in: batchIds }, $or: [{ status: "live" }, { status: "scheduled", scheduledAt: { $gte: new Date(now - 24 * 3600 * 1000), $lte: new Date(now + 36 * 3600 * 1000) } }] })
       .select("title scheduledAt durationMinutes status provider batch").sort({ scheduledAt: 1 }).limit(20).lean(),
-    Exam.find({ batches: { $in: batchIds }, isPublished: true, isActive: { $ne: false }, offline: { $ne: true }, $or: [{ opensAt: { $gte: new Date(now - 24 * 3600 * 1000), $lte: new Date(now + 36 * 3600 * 1000) } }, { closesAt: { $gte: new Date(now), $lte: new Date(now + 36 * 3600 * 1000) } }] })
+    Exam.find({ batches: { $in: batchIds }, isPublished: true, isActive: { $ne: false }, offline: null, $or: [{ opensAt: { $gte: new Date(now - 24 * 3600 * 1000), $lte: new Date(now + 36 * 3600 * 1000) } }, { closesAt: { $gte: new Date(now), $lte: new Date(now + 36 * 3600 * 1000) } }] })
       .select("title opensAt closesAt durationMinutes batches paperSet").limit(20).lean(),
     Tutor.find({ student: studentId, batch: { $in: batchIds }, enabled: true }).select("batch streak lastCompleteDay day tasks").lean(),
   ]);
