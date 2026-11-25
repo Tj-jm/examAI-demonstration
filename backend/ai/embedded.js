@@ -198,8 +198,13 @@ const launch = async (record, backend) => {
   starting = proc;
 
   let startupLog = "";
+  // "offloaded 29/29 layers to GPU": read as it streams, since the kept
+  // tail of the log can be past it by the time the server is ready.
+  let offload = null;
   const capture = (buf) => {
     startupLog = (startupLog + buf.toString()).slice(-16000);
+    const m = !offload && startupLog.match(/offloaded (\d+)\/(\d+) layers to GPU/);
+    if (m) offload = { layers: Number(m[1]), of: Number(m[2]) };
   };
   proc.stdout.on("data", capture);
   proc.stderr.on("data", capture);
@@ -221,9 +226,7 @@ const launch = async (record, backend) => {
     if (starting === proc) starting = null;
   }
 
-  // "offloaded 29/29 layers to GPU": how much of the model is on the GPU.
-  const offload = (startupLog.match(/offloaded (\d+)\/(\d+) layers to GPU/) || []).slice(1).map(Number);
-  return { proc, port, offload: offload.length ? { layers: offload[0], of: offload[1] } : null };
+  return { proc, port, offload };
 };
 
 const ensureRunning = async (catalogueId) => {

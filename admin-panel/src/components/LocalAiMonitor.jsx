@@ -71,7 +71,7 @@ export default function LocalAiMonitor() {
     <div className="stack" style={{ gap: 16 }}>
       <div className="spread">
         <p className="hint" style={{ margin: 0 }}>
-          The built-in model answers one request at a time on this server's CPU. Updates every {POLL_MS / 1000} seconds.
+          The built-in model answers one request at a time, on the GPU when there is one. Updates every {POLL_MS / 1000} seconds.
         </p>
         <button type="button" className="btn btn-sm btn-quiet" onClick={() => setPaused((v) => !v)}>
           {paused ? <><Play size={13} /> Resume</> : <><Pause size={13} /> Pause</>}
