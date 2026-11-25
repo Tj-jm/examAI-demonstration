@@ -215,6 +215,22 @@ const launch = async (record, backend) => {
   const sep = path.delimiter;
   const env = { ...process.env, LD_LIBRARY_PATH: [...libDirs, process.env.LD_LIBRARY_PATH].filter(Boolean).join(sep) };
   if (process.platform === "win32") env.PATH = [...libDirs, process.env.PATH].filter(Boolean).join(sep);
+
+  // A GPU build whose GPU library does not load (an NVIDIA driver too old
+  // for its CUDA version, a missing runtime file) still starts, silently on
+  // the CPU. Its device list shows that before the model is loaded:
+  // "CUDA0: NVIDIA GeForce RTX 3050 Laptop GPU (4095 MiB, 3354 MiB free)".
+  let devices = [];
+  if (gpu) {
+    const { execFile } = require("child_process");
+    const out = await new Promise((resolve) => execFile(binaryPath, ["--list-devices"], { env, timeout: 30000, windowsHide: true }, (e, so, se) => resolve(`${so || ""}\n${se || ""}`)));
+    devices = out.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[A-Za-z]+\d+:/.test(l));
+    const kind = { cuda: /^CUDA/i, vulkan: /^Vulkan/i, metal: /^(Metal|MTL)/i }[backend];
+    if (kind && !devices.some((d) => kind.test(d))) {
+      const hint = backend === "cuda" ? " Update the NVIDIA driver (this build needs one made for CUDA 12.4 or newer)." : "";
+      throw new Error(`The ${backend} build sees no GPU${devices.length ? ` (only: ${devices.join("; ")})` : ""}.${hint}`);
+    }
+  }
   const proc = spawn(binaryPath, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   hookExit();
   writePid(proc.pid);
@@ -259,6 +275,7 @@ const launch = async (record, backend) => {
     const after = await nvidiaMemory();
     if (after) details.unshift(`GPU memory: ${after.used} of ${after.total} MB in use after loading (${vram ? `${vram.used} MB before` : "before unknown"}).`);
   }
+  if (gpu) details.unshift(...devices.map((d) => `GPU found: ${d}`));
   if (gpu) details.unshift(`Started with: ${args.filter((a, i) => !["-m", "--mmproj"].includes(args[i - 1])).join(" ")}`);
   return { proc, port, offload, details };
 };
