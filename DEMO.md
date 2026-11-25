@@ -26,10 +26,28 @@ MongoDB runs beside the app with no open port: only the app reaches it.
 - A **Demo** mark and a **Notes** button on every page. Notes (or Alt+N)
   shows the sales notes for that page; hide them while sharing the screen.
 - **Reset demo** (in Notes, owners and admins) puts all data back to the
-  start. It also resets on every start and every night at 03:17.
+  start (or to your saved snapshot). It also resets on every start and every
+  night at 03:17.
 - The AI settings (Settings → AI: main connection, picture AI, voice) are
   kept through resets. Set them once.
 - No email or SMS is sent. Search engines are told to stay away.
+
+## Your own reset state
+
+By default a reset seeds made-up data. To make resets put back a demo you
+set up yourself (batches, lectures, pictures, videos):
+
+1. Set the demo up as it should look after every reset.
+2. Save it, from `backend`:
+   - locally: `node demo/snapshot.js save`
+   - Docker: `docker compose -f deploy/docker-compose.demo.yml exec app node demo/snapshot.js save`
+3. From then on every reset (start, nightly, **Reset demo**) puts back that
+   database and that uploads folder. Run `save` again to replace it.
+
+`node demo/snapshot.js info` shows when it was saved; `clear` deletes it, so
+resets seed again. The snapshot keeps everything except the AI settings,
+which stay as they are. Files in S3 are not copied. It lives in
+`backend/demo/snapshot` (or `DEMO_SNAPSHOT_PATH`), never in git.
 
 ## Sales notes
 

@@ -4,6 +4,9 @@
 //   require("./reset").start() in the server: the nightly reset and the
 //                              admin panel's "Reset demo".
 //
+// With a saved snapshot (demo/snapshot.js save), the reset puts that back:
+// its database and its uploads. Without one, it seeds:
+//
 // Steps: keep the AI settings (Settings → AI: the main connection, picture
 // AI, voice), drop the database, run the seed scripts in turn
 // (seed/index.js, seed/people.js, seed/fill.js), put the AI settings back,
@@ -44,12 +47,15 @@ const withDb = async (fn) => {
 
 const reset = async () => {
   if (!process.env.MONGO_URI) throw new Error("MONGO_URI is not set.");
+  const snapshot = require("./snapshot");
+  const fromSnapshot = snapshot.has();
   const ai = await withDb(async (conn) => {
     const docs = await conn.collection("aiconfigs").find({}).toArray();
     await conn.dropDatabase();
+    if (fromSnapshot) await snapshot.restoreInto(conn.db);
     return docs;
   });
-  for (const [file, args] of STEPS) await run(file, args);
+  if (!fromSnapshot) for (const [file, args] of STEPS) await run(file, args);
   await withDb(async (conn) => {
     const bcrypt = require("bcryptjs");
     const owner = process.env.DEMO_OWNER_PASSWORD;
@@ -63,6 +69,7 @@ const reset = async () => {
     }
   });
   last = new Date();
+  return fromSnapshot ? "snapshot" : "seed";
 };
 
 const start = () => {
@@ -70,7 +77,7 @@ const start = () => {
   busy = true;
   console.log("Demo: resetting data…");
   return reset()
-    .then(() => { console.log("Demo: data reset."); return true; })
+    .then((from) => { console.log(`Demo: data reset (from the ${from}).`); return true; })
     .catch((e) => { console.error(`Demo reset failed: ${e.message}`); return false; })
     .finally(() => { busy = false; });
 };

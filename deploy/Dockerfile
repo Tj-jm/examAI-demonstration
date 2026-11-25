@@ -26,7 +26,7 @@ COPY backend ./
 COPY --from=web /src/admin-panel/dist /app/admin-panel/dist
 COPY --from=web /src/student-app/dist /app/student-app/dist
 # Built-in model downloads and the llama.cpp binary are written at runtime.
-RUN mkdir -p /data/uploads embedded-models llama-bin geo-data \
+RUN mkdir -p /data/uploads /data/snapshot embedded-models llama-bin geo-data \
   && chown -R node:node /data embedded-models llama-bin geo-data
 # The city lookup's database (backend/utils/geo.js) lives on the data volume.
 ENV GEO_DATA_DIR=/data/geo

@@ -3,8 +3,9 @@
 // - One password in front of everything (DEMO_BASIC_USER / DEMO_BASIC_PASSWORD),
 //   asked by the browser before any page or API call loads.
 // - Never indexed by search engines.
-// - Demo data is wiped and seeded again on start, every night at 03:17
-//   server time, and from "Reset demo" in the admin panel (demo/reset.js).
+// - Demo data is wiped and seeded again (or the saved snapshot put back,
+//   demo/snapshot.js) on start, every night at 03:17 server time, and from
+//   "Reset demo" in the admin panel (demo/reset.js).
 // - GET /api/demo/info: the demo accounts to sign in as (emails only; reps
 //   are told the passwords), for the quick sign-in buttons.
 //

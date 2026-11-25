@@ -31,3 +31,6 @@ non-git/
 
 # The sales demo's settings (deploy/docker-compose.demo.yml)
 deploy/demo.env
+# The demo's saved reset state (backend/demo/snapshot.js): data and uploads.
+backend/demo/snapshot/
+backend/demo/snapshot.new/

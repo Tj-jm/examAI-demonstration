@@ -4,7 +4,8 @@
 #   docker compose -f deploy/docker-compose.demo.yml up -d --build
 #
 # MongoDB has no published port: only the app can reach it. The app wipes
-# and seeds the demo data on every start and every night (backend/demo).
+# the demo data on every start and every night and seeds it again, or puts
+# back the saved snapshot if there is one (backend/demo/snapshot.js).
 # Put HTTPS in front (Caddy, nginx or a tunnel); the app listens on 5000.
 services:
   mongo:
@@ -23,12 +24,15 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017/examai_demo
       DEMO_MODE: "1"
+      DEMO_SNAPSHOT_PATH: /data/snapshot
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
       - demo-uploads:/data/uploads
+      - demo-snapshot:/data/snapshot
     command: ["sh", "-c", "node demo/reset.js; exec node server.js"]
 
 volumes:
   demo-db:
   demo-uploads:
+  demo-snapshot:
