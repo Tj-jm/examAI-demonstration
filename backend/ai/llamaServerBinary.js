@@ -113,8 +113,9 @@ const detectGpu = async () => {
   if (builds.cuda) {
     try {
       const { stdout } = await execFileAsync("nvidia-smi", ["-L"], { timeout: 5000, windowsHide: true });
-      const gpu = stdout.split("\n").find((l) => /^GPU \d/.test(l));
-      if (gpu) { found.push("cuda"); notes.push(gpu.replace(/\s*\(UUID.*$/, "").trim()); }
+      // "GPU 0: NVIDIA GeForce RTX 3050 (UUID: GPU-…)", with \r\n on Windows.
+      const gpu = stdout.split(/\r?\n/).map((l) => l.trim()).find((l) => /^GPU \d/.test(l));
+      if (gpu) { found.push("cuda"); notes.push(gpu.replace(/^GPU \d+:\s*/, "").replace(/\s*\(UUID[^)]*\)/, "").trim()); }
     } catch { /* no NVIDIA driver */ }
   }
   if (builds.vulkan) {
