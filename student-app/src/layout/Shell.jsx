@@ -368,6 +368,7 @@ function WebLayout({ me, children }) {
     <Box sx={{ display: "flex", minHeight: "100dvh", bgcolor: "transparent" }}>
       <Drawer
         variant="permanent"
+        PaperProps={{ "data-side-nav": true }}
         sx={{ width: DRAWER_WIDTH, flexShrink: 0, "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box", borderRight: 1, borderColor: "divider" } }}
       >
         <Box sx={{ p: 2.5 }}><Logo /></Box>

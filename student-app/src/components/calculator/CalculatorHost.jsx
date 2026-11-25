@@ -46,13 +46,23 @@ export default function CalculatorHost() {
   const [error, setError] = useState("");
   const [pos, setPos] = useState(() => store.get("pos", null));
   const [navH, setNavH] = useState(0);
+  const [navW, setNavW] = useState(0);
   const drag = useRef(null);
   const panel = useRef(null);
 
-  // Clear of the bottom tab bar where there is one.
+  // Clear of the bottom tab bar, and of the left side menu on wide screens
+  // (it sat over the name and email at the menu's foot).
   useEffect(() => {
-    const el = document.querySelector("[data-bottom-nav]");
-    setNavH(el ? el.offsetHeight : 0);
+    const measure = () => {
+      const el = document.querySelector("[data-bottom-nav]");
+      setNavH(el ? el.offsetHeight : 0);
+      const side = document.querySelector("[data-side-nav]");
+      const r = side?.getBoundingClientRect();
+      setNavW(r && r.width && r.left <= 0 ? Math.round(r.right) : 0);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
   }, [location.pathname, wanted]);
 
   useEffect(() => { if (!wanted) setOpen(false); }, [wanted]);
@@ -161,7 +171,7 @@ export default function CalculatorHost() {
           color="default"
           aria-label="Open calculator"
           onClick={() => setOpen(true)}
-          sx={{ position: "fixed", left: 16, bottom, zIndex: 1500, bgcolor: "background.paper", color: "primary.main", boxShadow: 4 }}
+          sx={{ position: "fixed", left: navW + 16, bottom, zIndex: 1500, bgcolor: "background.paper", color: "primary.main", boxShadow: 4 }}
         >
           <Calculator size={20} />
         </Fab>
@@ -176,7 +186,7 @@ export default function CalculatorHost() {
           sx={{
             position: "fixed", zIndex: 1500, width: `min(${PANEL_W}px, calc(100vw - 16px))`, borderRadius: 3, overflow: "hidden",
             userSelect: "none", WebkitUserSelect: "none", touchAction: "manipulation",
-            ...(pos ? { left: pos.x, top: pos.y } : { left: 8, bottom }),
+            ...(pos ? { left: pos.x, top: pos.y } : { left: navW + 8, bottom }),
           }}
         >
           <Box
