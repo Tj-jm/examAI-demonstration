@@ -228,7 +228,8 @@ const launch = async (record, backend) => {
     const kind = { cuda: /^CUDA/i, vulkan: /^Vulkan/i, metal: /^(Metal|MTL)/i }[backend];
     if (kind && !devices.some((d) => kind.test(d))) {
       const hint = backend === "cuda" ? " Update the NVIDIA driver (this build needs one made for CUDA 12.4 or newer)." : "";
-      throw new Error(`The ${backend} build sees no GPU${devices.length ? ` (only: ${devices.join("; ")})` : ""}.${hint}`);
+      const said = out.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/initializing/.test(l)).slice(-4).join(" | ").slice(0, 300);
+      throw new Error(`The ${backend} build sees no GPU.${hint} It said: ${said || "nothing"}`);
     }
   }
   const proc = spawn(binaryPath, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -260,7 +261,8 @@ const launch = async (record, backend) => {
     await Promise.race([
       waitForHealth(port),
       exited.then((code) => {
-        throw new Error(`The built-in model server (${backend}) exited before starting (code ${code}).\n${startupLog.slice(-800)}`);
+        const errs = startupLog.split(/\r?\n/).filter((l) => / [EW] |error|fail|exception/i.test(l)).slice(-4).join(" | ").slice(0, 400);
+        throw new Error(`The built-in model server (${backend}) exited before starting (code ${code}${code === 3221226505 ? ", a crash" : ""}). ${errs || startupLog.slice(-300)}`);
       }),
     ]);
   } catch (error) {

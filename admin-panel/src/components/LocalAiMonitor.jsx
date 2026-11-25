@@ -93,7 +93,7 @@ export default function LocalAiMonitor() {
       )}
 
       {data?.gpuFailed && (
-        <div className="banner banner-warn">The GPU ({data.gpuFailed.backend}) did not start, so the model runs on the CPU: {data.gpuFailed.reason}</div>
+        <div className="banner banner-warn">The {data.gpuFailed.backend} build did not start, so the next option is used (another GPU build, else the CPU): {data.gpuFailed.reason}</div>
       )}
 
       <div className="card stack" style={{ gap: 10 }}>

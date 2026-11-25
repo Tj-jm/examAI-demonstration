@@ -17,7 +17,8 @@ import { Loading, useConfirm } from "./bits";
 // either installed or it isn't — never unreachable, and never something to
 // paste into a terminal.
 export default function EmbeddedModels({ currentModel, onUse, gpu = "auto", onGpu }) {
-  const { data, isLoading, refetch } = useGetEmbeddedModelsQuery();
+  // Polled: the GPU state changes when the model starts, not when this page loads.
+  const { data, isLoading, refetch } = useGetEmbeddedModelsQuery(undefined, { refetchOnMountOrArgChange: true, pollingInterval: 10000 });
   const [pull, { error: pullError }] = usePullEmbeddedModelMutation();
   const [remove, { error: removeError }] = useDeleteEmbeddedModelMutation();
   const [stop, { isLoading: stopping }] = useStopEmbeddedModelMutation();
@@ -116,7 +117,7 @@ export default function EmbeddedModels({ currentModel, onUse, gpu = "auto", onGp
         </span>
         {data?.gpuFailed && gpu !== "off" && (
           <span className="hint" style={{ color: "var(--warning)" }}>
-            The GPU ({data.gpuFailed.backend}) did not start, so the CPU is used: {data.gpuFailed.reason}
+            The {data.gpuFailed.backend} build did not start, so the next option is used (another GPU build, else the CPU): {data.gpuFailed.reason}
           </span>
         )}
       </div>
