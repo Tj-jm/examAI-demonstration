@@ -25,11 +25,16 @@ RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY backend ./
 COPY --from=web /src/admin-panel/dist /app/admin-panel/dist
 COPY --from=web /src/student-app/dist /app/student-app/dist
-# Built-in model downloads and the llama.cpp binary are written at runtime.
-RUN mkdir -p /data/uploads /data/snapshot embedded-models llama-bin geo-data \
-  && chown -R node:node /data embedded-models llama-bin geo-data
+# Built-in model downloads and the llama.cpp binary are written at runtime,
+# onto the data volume so an image update keeps them (several GB each).
+RUN mkdir -p /data/uploads /data/snapshot /data/embedded-models /data/llama-bin geo-data \
+  && chown -R node:node /data geo-data
+ENV EMBEDDED_MODELS_DIR=/data/embedded-models LLAMA_BIN_DIR=/data/llama-bin
 # The city lookup's database (backend/utils/geo.js) lives on the data volume.
 ENV GEO_DATA_DIR=/data/geo
+# Uploads, built-in models and the city database. Mount a named volume here
+# (-v examai-data:/data) to keep them across updates.
+VOLUME ["/data"]
 USER node
 EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

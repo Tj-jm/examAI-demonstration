@@ -44,7 +44,9 @@ const platformKey = () => `${process.platform}-${process.arch}`;
 // Sibling of embedded-models/ under backend/, not inside uploads/ — this is
 // platform-specific executable code, not user content, and the two should
 // never be swept together by a storage export/migration.
-const BIN_ROOT = path.join(__dirname, "../llama-bin");
+// LLAMA_BIN_DIR moves it onto a kept volume (the Docker image sets
+// /data/llama-bin).
+const BIN_ROOT = path.resolve(process.env.LLAMA_BIN_DIR || path.join(__dirname, "../llama-bin"));
 
 const extractTarGz = (archivePath, destDir) =>
   execFileAsync("tar", ["-xzf", archivePath, "-C", destDir]);
@@ -121,4 +123,4 @@ const resolveBinary = async () => {
   return { binaryPath, libDir: path.dirname(binaryPath) };
 };
 
-module.exports = { resolveBinary, LLAMA_CPP_TAG };
+module.exports = { resolveBinary, LLAMA_CPP_TAG, BIN_ROOT };

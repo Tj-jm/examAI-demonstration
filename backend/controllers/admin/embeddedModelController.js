@@ -11,7 +11,9 @@ const { downloadFile } = require("../../ai/download");
 // (these are not user-facing storage-adapter files, and are large enough
 // that they should never accidentally get swept into a storage export or
 // migration meant for lecture attachments and question images).
-const MODELS_DIR = path.join(__dirname, "../../embedded-models");
+// EMBEDDED_MODELS_DIR moves it onto a kept volume (the Docker image sets
+// /data/embedded-models), so an update does not mean downloading again.
+const MODELS_DIR = path.resolve(process.env.EMBEDDED_MODELS_DIR || path.join(__dirname, "../../embedded-models"));
 const ensureDir = () => fs.mkdirSync(MODELS_DIR, { recursive: true });
 
 // In-memory download progress. A restart mid-download loses the progress
@@ -116,7 +118,7 @@ const pullModel = asyncHandler(async (req, res) => {
           const { totalSize } = await downloadFile(url, destPath, ({ totalSize, downloadedSize }) => {
             perFile[i] = { done: downloadedSize, total: totalSize || perFile[i].total || downloadedSize };
             reportProgress();
-          });
+          }, { expect: "GGUF" });
           perFile[i].total = totalSize || perFile[i].total;
         }
         perFile[i].done = perFile[i].total = fs.statSync(destPath).size;

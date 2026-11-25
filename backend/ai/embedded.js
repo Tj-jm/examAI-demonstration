@@ -1,7 +1,9 @@
 const net = require("net");
 const EmbeddedModel = require("../models/embeddedModelModel");
 const { CATALOGUE } = require("./embeddedCatalogue");
-const { resolveBinary } = require("./llamaServerBinary");
+const fs = require("fs");
+const path = require("path");
+const { resolveBinary, BIN_ROOT } = require("./llamaServerBinary");
 const { spawn } = require("child_process");
 
 // The embedded provider runs a real llama.cpp server (llama-server) as a
@@ -16,7 +18,80 @@ const { spawn } = require("child_process");
 // just spawned and managed by this process instead of installed by hand.
 
 let current = null; // { catalogueId, port, proc }
+let starting = null; // the process while it loads, before it is current
 let switching = null;
+
+// The context window: prompt and answer together. Generation asks for up to
+// ~9,000 tokens of output and reading documents sends long prompts, so 4,096
+// cut answers off. 16,384 fits every catalogue model (each supports 32K or
+// more) at a few hundred MB to ~3 GB of extra RAM (most for the 14B).
+// EMBEDDED_CONTEXT changes it.
+const CONTEXT = Math.max(2048, Number(process.env.EMBEDDED_CONTEXT) || 16384);
+
+// The running server's process id, kept on disk so a backend that died
+// without stopping it (a crash, a dev restart) stops the leftover next time
+// instead of leaving it holding gigabytes of RAM.
+const PID_FILE = path.join(BIN_ROOT, "llama-server.pid");
+const writePid = (pid) => { try { fs.mkdirSync(BIN_ROOT, { recursive: true }); fs.writeFileSync(PID_FILE, String(pid)); } catch { /* best effort */ } };
+const clearPid = () => { try { fs.unlinkSync(PID_FILE); } catch { /* already gone */ } };
+
+// Only on Linux, where /proc shows the process is really llama-server: a
+// recycled id elsewhere could belong to anything.
+const stopLeftover = () => {
+  try {
+    const pid = Number(fs.readFileSync(PID_FILE, "utf8"));
+    if (pid && process.platform === "linux") {
+      const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+      if (cmd.includes("llama-server")) process.kill(pid, "SIGKILL");
+    }
+  } catch { /* nothing left over */ }
+  clearPid();
+};
+stopLeftover();
+
+// The server must not outlive the backend. "exit" covers a normal exit;
+// the signals cover Ctrl+C, docker stop and nodemon restarts, which end
+// Node without an "exit" event. Each handler stops the server, then
+// re-raises the signal so Node ends exactly as it would have.
+const killNow = () => {
+  for (const proc of [current?.proc, starting]) {
+    if (proc && proc.exitCode === null) { try { proc.kill("SIGKILL"); } catch { /* gone */ } }
+  }
+  clearPid();
+};
+let hooked = false;
+const hookExit = () => {
+  if (hooked) return;
+  hooked = true;
+  process.once("exit", killNow);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP", "SIGUSR2"]) {
+    if (process.platform === "win32" && sig !== "SIGINT") continue;
+    if (process.listenerCount(sig) > 0) continue; // someone else shuts down
+    const onSig = () => {
+      killNow();
+      process.removeListener(sig, onSig);
+      process.kill(process.pid, sig);
+    };
+    process.on(sig, onSig);
+  }
+};
+
+// Rough token count to keep the answer's budget inside the context window:
+// about 3 characters a token for English, about 1 for Bangla and other
+// non-Latin text; an image costs up to ~1,500 tokens.
+const estimate = (text) => {
+  const s = String(text || "");
+  const wide = (s.match(/[^\x00-\x7f]/g) || []).length;
+  return Math.ceil((s.length - wide) / 3 + wide);
+};
+const budget = ({ system, prompt, imageBase64, maxTokens }) => {
+  const used = estimate(system) + estimate(prompt) + (imageBase64 ? 1500 : 0) + 64;
+  const room = CONTEXT - used;
+  if (room < 256) {
+    throw new Error(`This request is too long for the built-in model (about ${used} tokens; it holds ${CONTEXT}). Set EMBEDDED_CONTEXT higher, or use a hosted AI for this.`);
+  }
+  return Math.min(maxTokens || room, room);
+};
 
 const findFreePort = () =>
   new Promise((resolve, reject) => {
@@ -46,7 +121,7 @@ const stopCurrent = async () => {
   if (!current) return;
   const { proc } = current;
   current = null;
-  if (!proc || proc.killed || proc.exitCode !== null) return;
+  if (!proc || proc.killed || proc.exitCode !== null) { clearPid(); return; }
   proc.kill("SIGTERM");
   await new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -55,6 +130,7 @@ const stopCurrent = async () => {
     }, 5000);
     proc.once("exit", () => { clearTimeout(timer); resolve(); });
   });
+  clearPid();
 };
 
 const resolveRecord = async (catalogueId) => {
@@ -80,7 +156,10 @@ const ensureRunning = async (catalogueId) => {
       "-m", record.filePath,
       "--port", String(port),
       "--host", "127.0.0.1",
-      "-c", "4096",
+      "-c", String(CONTEXT),
+      // One request at a time (see enqueue), so one slot gets the whole
+      // context; llama-server otherwise splits it across parallel slots.
+      "-np", "1",
       "-ngl", "0",
       "--no-webui",
     ];
@@ -90,6 +169,9 @@ const ensureRunning = async (catalogueId) => {
       env: { ...process.env, LD_LIBRARY_PATH: libDir },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    hookExit();
+    writePid(proc.pid);
+    starting = proc;
 
     let startupLog = "";
     const capture = (buf) => {
@@ -109,13 +191,16 @@ const ensureRunning = async (catalogueId) => {
       ]);
     } catch (error) {
       try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+      clearPid();
       throw error;
+    } finally {
+      if (starting === proc) starting = null;
     }
 
     const loaded = { catalogueId, port, proc };
     current = loaded;
     proc.once("exit", () => {
-      if (current?.proc === proc) current = null;
+      if (current?.proc === proc) { current = null; clearPid(); }
     });
 
     return loaded;
@@ -139,7 +224,9 @@ const enqueue = (fn) => {
   return run;
 };
 
-const complete = async ({ model: catalogueId, system, prompt, maxTokens, json, schema, schemaName, imageBase64, imageMimeType }) => {
+// `signal`: the caller's stop. A stopped request leaves the queue at once,
+// whether it is waiting its turn or already generating.
+const complete = async ({ model: catalogueId, system, prompt, maxTokens, json, schema, schemaName, imageBase64, imageMimeType, signal }) => {
   if (!catalogueId) {
     throw new Error("No built-in model is selected. Download and pick one in AI settings.");
   }
@@ -151,7 +238,11 @@ const complete = async ({ model: catalogueId, system, prompt, maxTokens, json, s
     );
   }
 
+  const answerTokens = budget({ system, prompt, imageBase64, maxTokens });
+
   return enqueue(async () => {
+    const { StoppedError } = require("./providers");
+    if (signal?.aborted) throw new StoppedError();
     const { port } = await ensureRunning(catalogueId);
 
     // Deferred, not a top-level require: providers/index.js requires this
@@ -169,12 +260,13 @@ const complete = async ({ model: catalogueId, system, prompt, maxTokens, json, s
       model: catalogueId,
       system,
       prompt,
-      maxTokens,
+      maxTokens: answerTokens,
       json,
       schema,
       schemaName,
       imageBase64,
       imageMimeType,
+      signal,
     });
 
     // openAiCompatible reports llama-server's own `model` field, which is

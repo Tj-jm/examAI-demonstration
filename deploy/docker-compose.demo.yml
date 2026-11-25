@@ -30,9 +30,13 @@ services:
     volumes:
       - demo-uploads:/data/uploads
       - demo-snapshot:/data/snapshot
+      - demo-models:/data/embedded-models
+      - demo-llama:/data/llama-bin
     command: ["sh", "-c", "node demo/reset.js; exec node server.js"]
 
 volumes:
   demo-db:
   demo-uploads:
   demo-snapshot:
+  demo-models:
+  demo-llama:
