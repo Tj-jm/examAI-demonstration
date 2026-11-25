@@ -201,10 +201,16 @@ const launch = async (record, backend) => {
   // "offloaded 29/29 layers to GPU": read as it streams, since the kept
   // tail of the log can be past it by the time the server is ready.
   let offload = null;
+  const details = [];
   const capture = (buf) => {
     startupLog = (startupLog + buf.toString()).slice(-16000);
     const m = !offload && startupLog.match(/offloaded (\d+)\/(\d+) layers to GPU/);
     if (m) offload = { layers: Number(m[1]), of: Number(m[2]) };
+    // The lines that say where the model went (GPU found, its free memory,
+    // layers, buffer sizes, memory fitting), kept for the Local AI tab.
+    for (const line of buf.toString().split(/\r?\n/)) {
+      if (details.length < 40 && /offload|CUDA|Vulkan|VRAM|fit|device|layers|buffer size|KV|n_ctx|MiB/i.test(line)) details.push(line.trim().slice(0, 240));
+    }
   };
   proc.stdout.on("data", capture);
   proc.stderr.on("data", capture);
@@ -226,7 +232,7 @@ const launch = async (record, backend) => {
     if (starting === proc) starting = null;
   }
 
-  return { proc, port, offload };
+  return { proc, port, offload, details };
 };
 
 const ensureRunning = async (catalogueId) => {
@@ -260,8 +266,8 @@ const ensureRunning = async (catalogueId) => {
     const gpuNote = started.backend === "cpu"
       ? (gpuFailed ? `GPU (${gpuFailed.backend}) failed: ${gpuFailed.reason}` : detected.note)
       : detected.note;
-    device = { backend: started.backend, offload: started.offload, note: gpuNote };
-    if (started.backend !== "cpu") console.log(`Built-in model: running on the GPU (${started.backend}${started.offload ? `, ${started.offload.layers}/${started.offload.of} layers` : ""}).`);
+    device = { backend: started.backend, offload: started.offload, note: gpuNote, details: started.details };
+    if (started.backend !== "cpu") console.log(`Built-in model: running on the GPU (${started.backend}${started.offload ? `, ${started.offload.layers}/${started.offload.of} layers` : ""}).\n  ${started.details.join("\n  ")}`);
 
     const { proc, port } = started;
     const loaded = { catalogueId, port, proc };

@@ -85,6 +85,13 @@ export default function LocalAiMonitor() {
         <Stat Icon={MemoryStick} name="Server" value={`${machine?.freeMemGb ?? "—"} GB free`} sub={`of ${machine?.totalMemGb ?? "—"} GB · ${machine?.cpus ?? "—"} CPU threads`} />
       </div>
 
+      {server?.device?.details?.length > 0 && (
+        <details className="card">
+          <summary className="small" style={{ cursor: "pointer" }}>Where the model went (start-up lines from the model server)</summary>
+          <pre className="small" style={{ whiteSpace: "pre-wrap", margin: "8px 0 0" }}>{server.device.details.join("\n")}</pre>
+        </details>
+      )}
+
       {data?.gpuFailed && (
         <div className="banner banner-warn">The GPU ({data.gpuFailed.backend}) did not start, so the model runs on the CPU: {data.gpuFailed.reason}</div>
       )}
